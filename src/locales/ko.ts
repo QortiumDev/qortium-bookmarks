@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "새로고침",
   "action.retry": "다시 시도",
   "action.save": "저장",
+  "label.accountUnavailable": "사용할 수 없는 계정",
+  "label.currentAccount": "현재",
   "label.loading": "불러오는 중",
+  "notice.openAccountUnsupported": "계정이 지정된 링크를 열려면 Home을 업데이트하세요.",
 };
 
 export default MESSAGES;

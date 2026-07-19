@@ -17,12 +17,21 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { applyBookmarkMutation, getBookmarks, getBookmarksCapability, hasBookmarksPermission } from './bookmarkApi';
+import {
+  applyBookmarkMutation,
+  getBookmarks,
+  getBookmarksCapability,
+  hasBookmarksPermission,
+  openSavedAddress,
+  QDN_RESOURCE_URL_ACTION,
+} from './bookmarkApi';
 import { hashForView, viewFromHash, type BookmarkView } from './appRoute';
 import {
+  buildAccountChoices,
   findTreeItem,
   flattenTree,
   buildMoveMutation,
+  friendlyLabelFor,
   getErrorCode,
   isDescendant,
   rootCount,
@@ -31,6 +40,7 @@ import {
   type BookmarkSnapshot,
   type BookmarkTreeItem,
   type DashboardPin,
+  type HomeAccountOption,
   type LinkDraft,
   type RootId,
   type StartPage,
@@ -44,7 +54,15 @@ import {
   normalizeHomeSettingsHostMessage,
   type QdnDisplaySettings,
 } from './displaySettings';
-import { createTranslator } from './i18n';
+import { createTranslator, type TranslateFunction } from './i18n';
+import {
+  buildIconCandidates,
+  getCachedQdnIconUrl,
+  iconCacheKeyFor,
+  monogramFor,
+  parseQdnAddress,
+  resolveQdnIconUrl,
+} from './qdnIcon';
 import { hasAction, qdnRequest } from './qdnRequest';
 import { bookmarkManagerStateReducer, INITIAL_BOOKMARK_MANAGER_STATE, shouldRefreshForRevision } from './bookmarkState';
 import { BookmarkLoadGuard, runSingleFlight, type SingleFlight } from './bookmarkLoadGuard';
@@ -121,7 +139,75 @@ function specialItemId(item: DashboardPin | StartPage): string {
 }
 
 function specialTitle(item: DashboardPin | StartPage): string {
-  return 'label' in item ? item.customLabel || item.label : item.title || item.displayUrl;
+  const provided = ('label' in item ? item.customLabel || item.label : item.title) ?? '';
+  return friendlyLabelFor(provided, item.displayUrl);
+}
+
+function AccountBadge({ accountId, availableAccounts, t }: { accountId?: string | null; availableAccounts: HomeAccountOption[]; t: TranslateFunction }) {
+  if (!accountId) return null;
+  const label = availableAccounts.find((account) => account.id === accountId)?.label ?? t('label.accountUnavailable');
+  return <span className="account-badge" title={label}>{label}</span>;
+}
+
+function QdnPlaceIcon({ address, label, actions, fallback }: { address: string; label: string; actions: string[]; fallback: React.ReactNode }) {
+  const parsed = useMemo(() => parseQdnAddress(address), [address]);
+  const [iconUrl, setIconUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const hostRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    setIconUrl(null);
+    setFailed(false);
+    setVisible(false);
+  }, [address]);
+
+  useEffect(() => {
+    const node = hostRef.current;
+    if (!node || visible) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setVisible(true);
+    }, { rootMargin: '120px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !parsed || !hasAction(actions, QDN_RESOURCE_URL_ACTION)) return;
+    let cancelled = false;
+    const candidates = buildIconCandidates(parsed);
+    void getCachedQdnIconUrl(iconCacheKeyFor(parsed), () => resolveQdnIconUrl(
+      candidates,
+      async (candidate) => {
+        const url = await qdnRequest<unknown>({ action: QDN_RESOURCE_URL_ACTION, ...candidate });
+        return typeof url === 'string' && url ? url : null;
+      },
+      (url) => new Promise((resolve) => {
+        const image = new window.Image();
+        image.onload = () => resolve(true);
+        image.onerror = () => resolve(false);
+        image.src = url;
+      }),
+    )).then((url) => {
+      if (cancelled) return;
+      if (url) setIconUrl(url);
+      else setFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [visible, parsed, actions]);
+
+  if (!parsed) return <>{fallback}</>;
+  return (
+    <span className="item-icon__media" ref={hostRef}>
+      {iconUrl && !failed
+        ? <img src={iconUrl} alt="" loading="lazy" onError={() => setFailed(true)} />
+        : <span className="item-icon__monogram" aria-hidden="true">{monogramFor(label)}</span>}
+    </span>
+  );
 }
 
 function IconButton({ label, onClick, children, danger = false, disabled = false }: { label: string; onClick: () => void; children: React.ReactNode; danger?: boolean; disabled?: boolean }) {
@@ -353,13 +439,10 @@ export function App() {
     if (pendingMutation) void runMutation(pendingMutation);
   }, [pendingMutation, runMutation]);
 
-  const openSavedAddress = async (address: string) => {
-    if (hasAction(actions, 'OPEN_NEW_TAB')) {
-      await qdnRequest({ action: 'OPEN_NEW_TAB', address });
-      return;
-    }
-    window.open(address, '_blank', 'noopener,noreferrer');
-  };
+  const openItem = useCallback(async (address: string, accountId?: string | null) => {
+    const plan = await openSavedAddress(actions, address, accountId);
+    if (plan.action === 'ACCOUNT_UNSUPPORTED') setNotice(t('notice.openAccountUnsupported'));
+  }, [actions, t]);
 
   const openAddLink = (rootId: RootId, parentFolderId: string | null = null) => setEditor({
     kind: 'link', mode: 'add', rootId, parentFolderId, title: '', displayUrl: '', accountId: '',
@@ -404,14 +487,17 @@ export function App() {
         <article className="item-row" style={{ '--depth': depth } as React.CSSProperties}>
           <span className="item-row__grip" aria-hidden="true"><GripVertical /></span>
           <span className={`item-icon${item.type === 'folder' ? ' item-icon--folder' : ''}`}>
-            {item.type === 'folder' ? <Folder /> : <Bookmark />}
+            {item.type === 'folder'
+              ? <Folder />
+              : <QdnPlaceIcon address={item.displayUrl} label={friendlyLabelFor(item.title, item.displayUrl)} actions={actions} fallback={<Bookmark />} />}
           </span>
           <div className="item-row__body">
-            <strong>{item.title}</strong>
+            <strong>{item.type === 'folder' ? item.title : friendlyLabelFor(item.title, item.displayUrl)}</strong>
             <span>{item.type === 'folder' ? t('label.folderItems', { count: item.children.length }) : item.displayUrl}</span>
+            {item.type === 'bookmark' ? <AccountBadge accountId={item.accountId} availableAccounts={snapshot?.availableAccounts ?? []} t={t} /> : null}
           </div>
           <div className="item-row__actions">
-            {item.type === 'bookmark' ? <IconButton label={t('aria.openItem', { title: item.title })} onClick={() => void openSavedAddress(item.displayUrl)}><ExternalLink /></IconButton> : null}
+            {item.type === 'bookmark' ? <IconButton label={t('aria.openItem', { title: friendlyLabelFor(item.title, item.displayUrl) })} onClick={() => void openItem(item.displayUrl, item.accountId)}><ExternalLink /></IconButton> : null}
             {item.type === 'folder' ? <>
               <IconButton label={t('aria.addLinkTo', { title: item.title })} onClick={() => openAddLink(rootId, item.id)}><Plus /></IconButton>
               <IconButton label={t('aria.addFolderTo', { title: item.title })} onClick={() => setEditor({ kind: 'folder', mode: 'add', rootId, parentFolderId: item.id, title: '' })}><FolderPlus /></IconButton>
@@ -458,6 +544,11 @@ export function App() {
   const preparedMoveMutation = useMemo(() => {
     if (!snapshot || editor?.kind !== 'move') return null;
     return buildMoveMutation(snapshot, editor);
+  }, [editor, snapshot]);
+
+  const accountChoices = useMemo(() => {
+    if (!snapshot || editor?.kind !== 'link') return [];
+    return buildAccountChoices(snapshot.availableAccounts, editor.accountId || null);
   }, [editor, snapshot]);
 
   function submitEditor(event: React.FormEvent) {
@@ -557,10 +648,16 @@ export function App() {
               {(view === 'pins' || view === 'startPages') ? visibleSpecial.map((item) => (
                 <article className="item-row" key={specialItemId(item)}>
                   <span className="item-row__grip" aria-hidden="true"><GripVertical /></span>
-                  <span className="item-icon">{view === 'pins' ? <Pin /> : <Home />}</span>
-                  <div className="item-row__body"><strong>{specialTitle(item)}</strong><span>{item.displayUrl}</span></div>
+                  <span className="item-icon">
+                    <QdnPlaceIcon address={item.displayUrl} label={specialTitle(item)} actions={actions} fallback={view === 'pins' ? <Pin /> : <Home />} />
+                  </span>
+                  <div className="item-row__body">
+                    <strong>{specialTitle(item)}</strong>
+                    <span>{item.displayUrl}</span>
+                    <AccountBadge accountId={item.accountId} availableAccounts={snapshot?.availableAccounts ?? []} t={t} />
+                  </div>
                   <div className="item-row__actions">
-                    <IconButton label={t('aria.openItem', { title: specialTitle(item) })} onClick={() => void openSavedAddress(item.displayUrl)}><ExternalLink /></IconButton>
+                    <IconButton label={t('aria.openItem', { title: specialTitle(item) })} onClick={() => void openItem(item.displayUrl, item.accountId)}><ExternalLink /></IconButton>
                     <IconButton label={t('aria.moveItem', { title: specialTitle(item) })} onClick={() => openMove(view === 'pins' ? 'pins' : 'startPages', specialItemId(item))}><GripVertical /></IconButton>
                     <IconButton label={t('aria.editItem', { title: specialTitle(item) })} onClick={() => openEditSpecial(view === 'pins' ? 'pins' : 'startPages', item)}><Pencil /></IconButton>
                     <IconButton danger label={t('aria.deleteItem', { title: specialTitle(item) })} onClick={() => removeSpecial(view === 'pins' ? 'pins' : 'startPages', item)}><Trash2 /></IconButton>
@@ -583,7 +680,14 @@ export function App() {
             {editor.kind === 'link' ? <>
               <label>{t('field.title')}<input autoFocus required value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
               <label>{t('field.address')}<input required value={editor.displayUrl} onChange={(event) => setEditor({ ...editor, displayUrl: event.target.value })} placeholder={t('field.addressPlaceholder')} /></label>
-              <label>{t('field.account')} <small>({t('label.optional')})</small><input value={editor.accountId} onChange={(event) => setEditor({ ...editor, accountId: event.target.value })} /></label>
+              <label>{t('field.account')} <small>({t('label.optional')})</small>
+                <select value={editor.accountId} onChange={(event) => setEditor({ ...editor, accountId: event.target.value })}>
+                  <option value="">{t('label.currentAccount')}</option>
+                  {accountChoices.map((choice) => (
+                    <option key={choice.id} value={choice.id}>{choice.unavailable ? `${choice.label} (${t('label.accountUnavailable')})` : choice.label}</option>
+                  ))}
+                </select>
+              </label>
             </> : null}
             {editor.kind === 'move' ? <>
               <label>{t('field.destination')}<select value={editor.targetRootId} onChange={(event) => setEditor({ ...editor, targetRootId: event.target.value as RootId, targetFolderId: '', targetItemId: '' })}>

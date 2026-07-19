@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "更新",
   "action.retry": "再試行",
   "action.save": "保存",
+  "label.accountUnavailable": "利用できないアカウント",
+  "label.currentAccount": "現在",
   "label.loading": "読み込み中",
+  "notice.openAccountUnsupported": "アカウント付きで保存したリンクを開くには Home を更新してください。",
 };
 
 export default MESSAGES;

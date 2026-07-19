@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "रीफ्रेश करें",
   "action.retry": "फिर कोशिश करें",
   "action.save": "सहेजें",
+  "label.accountUnavailable": "खाता अनुपलब्ध",
+  "label.currentAccount": "मौजूदा",
   "label.loading": "लोड हो रहा है",
+  "notice.openAccountUnsupported": "किसी खाते के साथ सहेजे गए लिंक खोलने के लिए Home अपडेट करें।",
 };
 
 export default MESSAGES;

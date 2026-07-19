@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "Actualizar",
   "action.retry": "Reintentar",
   "action.save": "Guardar",
+  "label.accountUnavailable": "Cuenta no disponible",
+  "label.currentAccount": "Actual",
   "label.loading": "Cargando",
+  "notice.openAccountUnsupported": "Actualiza Home para abrir enlaces guardados con una cuenta.",
 };
 
 export default MESSAGES;

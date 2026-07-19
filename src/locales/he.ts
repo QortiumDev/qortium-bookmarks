@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "רענון",
   "action.retry": "ניסיון חוזר",
   "action.save": "שמירה",
+  "label.accountUnavailable": "חשבון לא זמין",
+  "label.currentAccount": "נוכחי",
   "label.loading": "טוען",
+  "notice.openAccountUnsupported": "עדכנו את Home כדי לפתוח קישורים שנשמרו עם חשבון.",
 };
 
 export default MESSAGES;

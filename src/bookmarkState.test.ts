@@ -3,7 +3,15 @@ import { bookmarkManagerStateReducer, INITIAL_BOOKMARK_MANAGER_STATE, shouldRefr
 import type { BookmarkMutation, BookmarkSnapshot } from './bookmarkManager';
 
 const snapshot = {
-  schemaVersion: 1, revision: 3, bookmarks: [], toolbar: [], toolbarVisibility: 'hidden', dashboardPins: [], startPages: [],
+  schemaVersion: 1,
+  revision: 3,
+  activeAccountId: null,
+  availableAccounts: [],
+  bookmarks: [],
+  toolbar: [],
+  toolbarVisibility: 'hidden',
+  dashboardPins: [],
+  startPages: [],
 } satisfies BookmarkSnapshot;
 const mutation: BookmarkMutation = { type: 'setToolbarVisibility', toolbarVisibility: 'always' };
 

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   countTreeItems,
+  buildAccountChoices,
   buildMoveMutation,
   findTreeItem,
   flattenTree,
+  friendlyLabelFor,
   getErrorCode,
   isDescendant,
   parseBookmarkSnapshot,
+  qdnNameFromAddress,
   rootCount,
   type BookmarkSnapshot,
 } from './bookmarkManager';
@@ -14,6 +17,8 @@ import {
 const snapshot: BookmarkSnapshot = {
   schemaVersion: 1,
   revision: 7,
+  activeAccountId: 'account-1',
+  availableAccounts: [{ id: 'account-1', label: 'Main' }],
   bookmarks: [
     {
       type: 'folder', id: 'folder-a', title: 'Apps', createdAt: 1,
@@ -85,5 +90,53 @@ describe('bookmark manager contract', () => {
       itemId: 'home://dashboard', sourceRootId: 'startPages', targetRootId: 'startPages',
       targetFolderId: '', targetItemId: '', targetPosition: 'after',
     })).toBeNull();
+  });
+
+  it('defaults availableAccounts and activeAccountId for older Home responses', () => {
+    const { availableAccounts, activeAccountId, ...legacySnapshot } = snapshot;
+    expect(parseBookmarkSnapshot(legacySnapshot)).toMatchObject({ availableAccounts: [], activeAccountId: null });
+  });
+
+  it('rejects an availableAccounts entry missing an id or label', () => {
+    expect(() => parseBookmarkSnapshot({ ...snapshot, availableAccounts: [{ id: 'a' }] })).toThrow();
+  });
+});
+
+describe('account choices', () => {
+  it('lists Home-provided accounts as-is when the saved id matches one', () => {
+    const accounts = [{ id: 'a', label: 'Main' }, { id: 'b', label: 'Alt' }];
+    expect(buildAccountChoices(accounts, 'a')).toEqual([
+      { id: 'a', label: 'Main' },
+      { id: 'b', label: 'Alt' },
+    ]);
+  });
+
+  it('appends an unavailable choice for a saved id Home no longer reports, without dropping it', () => {
+    const accounts = [{ id: 'a', label: 'Main' }];
+    expect(buildAccountChoices(accounts, 'removed-account')).toEqual([
+      { id: 'a', label: 'Main' },
+      { id: 'removed-account', label: 'removed-account', unavailable: true },
+    ]);
+  });
+
+  it('adds no unavailable choice when nothing was saved', () => {
+    expect(buildAccountChoices([{ id: 'a', label: 'Main' }], null)).toEqual([{ id: 'a', label: 'Main' }]);
+    expect(buildAccountChoices([{ id: 'a', label: 'Main' }], '')).toEqual([{ id: 'a', label: 'Main' }]);
+  });
+});
+
+describe('friendly labels from QDN addresses', () => {
+  it('extracts the registered name from APP and WEBSITE addresses', () => {
+    expect(qdnNameFromAddress('qdn://APP/Help/Help')).toBe('Help');
+    expect(qdnNameFromAddress('qdn://APP/Trust/Trust')).toBe('Trust');
+    expect(qdnNameFromAddress('qdn://WEBSITE/Node')).toBe('Node');
+    expect(qdnNameFromAddress('home://dashboard')).toBeNull();
+  });
+
+  it('derives a friendly label only when the title is blank or duplicates the address', () => {
+    expect(friendlyLabelFor('', 'qdn://APP/Help/Help')).toBe('Help');
+    expect(friendlyLabelFor('qdn://APP/Help/Help', 'qdn://APP/Help/Help')).toBe('Help');
+    expect(friendlyLabelFor('My favorite help page', 'qdn://APP/Help/Help')).toBe('My favorite help page');
+    expect(friendlyLabelFor(undefined, 'home://dashboard')).toBe('home://dashboard');
   });
 });

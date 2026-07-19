@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "Frissítés",
   "action.retry": "Újra",
   "action.save": "Mentés",
+  "label.accountUnavailable": "Fiók nem érhető el",
+  "label.currentAccount": "Jelenlegi",
   "label.loading": "Betöltés",
+  "notice.openAccountUnsupported": "Frissítsd a Home-ot a fiókhoz mentett hivatkozások megnyitásához.",
 };
 
 export default MESSAGES;

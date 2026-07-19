@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "重新整理",
   "action.retry": "重試",
   "action.save": "儲存",
+  "label.accountUnavailable": "帳戶無法使用",
+  "label.currentAccount": "目前",
   "label.loading": "載入中",
+  "notice.openAccountUnsupported": "更新 Home 以開啟已儲存帳戶的連結。",
 };
 
 export default MESSAGES;

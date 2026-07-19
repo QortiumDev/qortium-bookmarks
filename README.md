@@ -34,6 +34,10 @@ Qortium Home 1.5 or newer.
 - Move links between trees, dashboard pins, and start pages.
 - Reorder dashboard pins and start pages.
 - Change Home's bookmark toolbar visibility.
+- Assign a saved place to a specific Home account, chosen from Home's account
+  list instead of typing an ID, and open it under that exact account.
+- Show real QDN app icons for saved `qdn://APP/...` and `qdn://WEBSITE/...`
+  places, with a stable monogram fallback.
 - Refresh automatically after Home bookmark changes.
 - Preserve a stale pending edit for explicit review and retry.
 - Follow Home theme, language, accent, text size, and Classic/Modern/Fun UI.
