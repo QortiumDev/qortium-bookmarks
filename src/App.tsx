@@ -486,7 +486,7 @@ export function App() {
       <div className="tree-branch" key={item.id}>
         <article className="item-row" style={{ '--depth': depth } as React.CSSProperties}>
           <span className="item-row__grip" aria-hidden="true"><GripVertical /></span>
-          <span className={`item-icon${item.type === 'folder' ? ' item-icon--folder' : ''}`}>
+          <span className={`item-icon${item.type === 'folder' ? ' item-icon--folder' : parseQdnAddress(item.displayUrl) ? ' item-icon--qdn' : ''}`}>
             {item.type === 'folder'
               ? <Folder />
               : <QdnPlaceIcon address={item.displayUrl} label={friendlyLabelFor(item.title, item.displayUrl)} actions={actions} fallback={<Bookmark />} />}
@@ -648,7 +648,7 @@ export function App() {
               {(view === 'pins' || view === 'startPages') ? visibleSpecial.map((item) => (
                 <article className="item-row" key={specialItemId(item)}>
                   <span className="item-row__grip" aria-hidden="true"><GripVertical /></span>
-                  <span className="item-icon">
+                  <span className={`item-icon${parseQdnAddress(item.displayUrl) ? ' item-icon--qdn' : ''}`}>
                     <QdnPlaceIcon address={item.displayUrl} label={specialTitle(item)} actions={actions} fallback={view === 'pins' ? <Pin /> : <Home />} />
                   </span>
                   <div className="item-row__body">
