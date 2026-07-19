@@ -9,7 +9,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   "action.refresh": "Ανανέωση",
   "action.retry": "Επανάληψη",
   "action.save": "Αποθήκευση",
+  "label.accountUnavailable": "Μη διαθέσιμος λογαριασμός",
+  "label.currentAccount": "Τρέχων",
   "label.loading": "Φόρτωση",
+  "notice.openAccountUnsupported": "Ενημερώστε το Home για να ανοίγετε συνδέσμους με αποθηκευμένο λογαριασμό.",
 };
 
 export default MESSAGES;

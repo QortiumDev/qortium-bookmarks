@@ -40,7 +40,14 @@ export type StartPage = {
   title?: string;
 };
 
+export type HomeAccountOption = {
+  id: string;
+  label: string;
+};
+
 export type BookmarkSnapshot = {
+  activeAccountId: string | null;
+  availableAccounts: HomeAccountOption[];
   bookmarks: BookmarkTreeItem[];
   dashboardPins: DashboardPin[];
   revision: number;
@@ -144,6 +151,14 @@ export function parseBookmarkSnapshot(value: unknown): BookmarkSnapshot {
     bookmarks: value.bookmarks.map((item) => parseTreeItem(item)),
     toolbar: value.toolbar.map((item) => parseTreeItem(item)),
     toolbarVisibility: value.toolbarVisibility as ToolbarVisibility,
+    // Home 1.5 additions: older Home responses omit these, so default to "no accounts known".
+    availableAccounts: Array.isArray(value.availableAccounts)
+      ? value.availableAccounts.filter(isRecord).map((account) => ({
+          id: requireString(account.id, 'Account id'),
+          label: requireString(account.label, 'Account label'),
+        }))
+      : [],
+    activeAccountId: typeof value.activeAccountId === 'string' ? value.activeAccountId : null,
     dashboardPins: value.dashboardPins.map((pin) => {
       if (!isRecord(pin)) throw new Error('Dashboard pin is invalid.');
       return {
@@ -232,4 +247,44 @@ export function buildMoveMutation(snapshot: BookmarkSnapshot, draft: BookmarkMov
     ...(treeTarget ? { targetFolderId: draft.targetFolderId || null } : {}),
     ...(targetItemId ? { targetItemId, targetPosition } : {}),
   };
+}
+
+export type AccountChoice = HomeAccountOption & { unavailable?: boolean };
+
+/**
+ * Builds the Current + Home-provided account list for the account picker. If
+ * the item's saved accountId no longer matches any Home account (removed or
+ * from a different device), it is kept as a trailing "unavailable" choice
+ * instead of being silently dropped so unrelated edits don't clear it.
+ */
+export function buildAccountChoices(availableAccounts: HomeAccountOption[], savedAccountId: string | null | undefined): AccountChoice[] {
+  const choices: AccountChoice[] = availableAccounts.map((account) => ({ ...account }));
+  if (savedAccountId && !availableAccounts.some((account) => account.id === savedAccountId)) {
+    choices.push({ id: savedAccountId, label: savedAccountId, unavailable: true });
+  }
+  return choices;
+}
+
+const QDN_NAME_PATTERN = /^qdn:\/\/(?:app|website)\/([^/?#]+)/i;
+
+/** Extracts the registered QDN name (e.g. "Help") from a qdn://APP/Help/Help style address. */
+export function qdnNameFromAddress(displayUrl: string): string | null {
+  const match = QDN_NAME_PATTERN.exec(displayUrl.trim());
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+/**
+ * Resolves the label shown for a saved place. When a saved title is blank or
+ * just repeats the address, this derives a friendlier label from the QDN name
+ * instead of rendering the same address twice in the row.
+ */
+export function friendlyLabelFor(title: string | undefined, displayUrl: string): string {
+  const trimmed = (title ?? '').trim();
+  if (trimmed && trimmed !== displayUrl) return trimmed;
+  return qdnNameFromAddress(displayUrl) ?? displayUrl;
 }

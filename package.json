@@ -1,6 +1,6 @@
 {
   "name": "qortium-bookmarks",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "license": "0BSD",
   "description": "Manage Qortium Home bookmarks, toolbar links, dashboard pins, and start pages.",
