@@ -129,7 +129,17 @@ select, .editor-form input { background: var(--qb-surface); border: 1px solid va
 .tree-branch { display: contents; }
 .item-row { align-items: center; background: var(--qb-surface); border: 1px solid var(--qb-border); border-radius: 8px; display: flex; gap: 9px; min-width: 0; padding: 9px; padding-inline-start: calc(9px + var(--depth, 0) * 25px); transition: border-color .15s, background .15s; }
 .item-row:hover { background: var(--qb-surface-alt); border-color: var(--qb-border-strong); }
-.item-row__grip { color: var(--qb-muted); display: flex; flex: 0 0 auto; }
+.drop-row { min-width: 0; position: relative; }
+.drag-handle { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--qb-muted); cursor: grab; display: inline-flex; flex: 0 0 auto; justify-content: center; min-height: 36px; min-width: 36px; padding: 7px; touch-action: none; }
+.drag-handle:hover, .drag-handle--active { background: var(--qb-control-hover); border-color: var(--qb-border); color: var(--qb-text-primary); }
+.drag-handle:active { cursor: grabbing; }
+.drop-edge { height: 12px; inset-inline: 0; pointer-events: none; position: absolute; z-index: 2; }
+.drop-edge--before { top: -9px; }
+.drop-edge--after { bottom: -9px; }
+.drop-edge::after { background: var(--qb-accent); border-radius: 2px; content: ''; display: none; height: 3px; inset-inline: 4px; position: absolute; top: 50%; transform: translateY(-50%); }
+.item-list--dragging .drop-edge { pointer-events: auto; }
+.drop-edge.drop-zone--over::after { display: block; }
+.item-drop.drop-zone--over > .item-row { background: var(--qb-accent-soft); border-color: var(--qb-accent); }
 .item-icon { align-items: center; background: var(--qb-accent-soft); border-radius: 8px; color: var(--qb-accent); display: flex; flex: 0 0 auto; height: 36px; justify-content: center; width: 36px; }
 .item-icon--folder { background: var(--qb-control); color: var(--qb-text-secondary); }
 .item-icon--qdn { align-self: flex-start; background: transparent; border-radius: 0; height: calc(42px * var(--qb-scale)); width: calc(42px * var(--qb-scale)); }
@@ -168,7 +178,7 @@ select, .editor-form input { background: var(--qb-surface); border: 1px solid va
 .segmented button.active { background: var(--qb-accent-soft); box-shadow: inset 0 0 0 2px var(--qb-accent); color: var(--qb-accent); }
 
 :root[data-ui='fun'] .tabs, :root[data-ui='fun'] .content-panel, :root[data-ui='fun'] .gate, :root[data-ui='fun'] .modal { border-radius: 18px; }
-:root[data-ui='fun'] .button, :root[data-ui='fun'] .icon-button, :root[data-ui='fun'] .item-row, :root[data-ui='fun'] input, :root[data-ui='fun'] select { border-radius: 13px; }
+:root[data-ui='fun'] .button, :root[data-ui='fun'] .icon-button, :root[data-ui='fun'] .drag-handle, :root[data-ui='fun'] .item-row, :root[data-ui='fun'] input, :root[data-ui='fun'] select { border-radius: 13px; }
 
 @media (max-width: 760px) {
   .app-shell { padding: 12px 10px 24px; }
