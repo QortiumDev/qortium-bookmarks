@@ -220,6 +220,113 @@ export function getErrorCode(error: unknown): string {
   return '';
 }
 
+/**
+ * Home rejects BOOKMARKS_APPLY drafts whose displayUrl fails its central
+ * address validation; newer Home versions tag that rejection with this code.
+ * Only the code is inspected here: the app deliberately never re-implements
+ * Home's address grammar.
+ */
+export function isInvalidAddressError(error: unknown): boolean {
+  return getErrorCode(error) === 'INVALID_ADDRESS';
+}
+
+export type DuplicateCheckTarget = {
+  itemId?: string | null;
+  mode: 'add' | 'edit';
+  parentFolderId?: string | null;
+  rootId: RootId;
+};
+
+/**
+ * Pre-checks add/edit link drafts against Home's duplicate rule (exact
+ * displayUrl match within the target folder for tree links, within the whole
+ * list for pins and start pages) so the editor can explain the rejection
+ * instead of surfacing a generic "no changes". Home stays the source of truth:
+ * a miss here still round-trips and falls back to the changed:false notice.
+ */
+export function isDuplicateDisplayUrl(snapshot: BookmarkSnapshot, target: DuplicateCheckTarget, displayUrl: string): boolean {
+  const address = displayUrl.trim();
+  if (!address) return false;
+  if (target.rootId === 'bookmarks' || target.rootId === 'toolbar') {
+    const entries = flattenTree(snapshot[target.rootId]);
+    const parentFolderId = target.mode === 'edit'
+      ? entries.find(({ item }) => item.id === target.itemId)?.parentFolderId ?? null
+      : target.parentFolderId ?? null;
+    return entries.some(({ item, parentFolderId: entryParentId }) => entryParentId === parentFolderId
+      && item.type === 'bookmark' && item.id !== target.itemId && item.displayUrl === address);
+  }
+  if (target.rootId === 'pins') {
+    return snapshot.dashboardPins.some((pin) => pin.id !== target.itemId && pin.displayUrl === address);
+  }
+  return snapshot.startPages.some((page) => page.displayUrl !== target.itemId && page.displayUrl === address);
+}
+
+export type BookmarkDragPayload = {
+  itemId: string;
+  sourceRootId: RootId;
+};
+
+export type BookmarkDropTarget = {
+  folderId: string | null;
+  itemId: string | null;
+  position: DropPosition;
+  rootId: RootId;
+};
+
+export function encodeDragPayload(payload: BookmarkDragPayload): string {
+  return JSON.stringify(payload);
+}
+
+export function decodeDragPayload(value: string): BookmarkDragPayload | null {
+  try {
+    const payload = JSON.parse(value) as Partial<BookmarkDragPayload>;
+    return payload.itemId && typeof payload.itemId === 'string' && ROOT_IDS.includes(payload.sourceRootId as RootId)
+      ? { itemId: payload.itemId, sourceRootId: payload.sourceRootId as RootId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads a drop zone's data-drop-* attributes back into a typed drop target. */
+export function dropTargetFromDataset(dataset: { dropFolder?: string; dropItem?: string; dropPosition?: string; dropRoot?: string }): BookmarkDropTarget | null {
+  if (!ROOT_IDS.includes(dataset.dropRoot as RootId)) return null;
+  return {
+    folderId: dataset.dropFolder || null,
+    itemId: dataset.dropItem || null,
+    position: dataset.dropPosition === 'before' ? 'before' : dataset.dropPosition === 'inside' ? 'inside' : 'after',
+    rootId: dataset.dropRoot as RootId,
+  };
+}
+
+/**
+ * Builds the moveItem mutation for a drag-and-drop, using the same shape the
+ * move modal submits: dropping "inside" a folder appends (no targetItemId),
+ * before/after anchor on the sibling row. Returns null for no-ops (item onto
+ * itself) and for cycles (a folder into itself or its own subtree).
+ */
+export function buildDropMoveMutation(snapshot: BookmarkSnapshot, payload: BookmarkDragPayload, target: BookmarkDropTarget): BookmarkMutation | null {
+  if (payload.sourceRootId === target.rootId && payload.itemId === target.itemId) return null;
+  const treeTarget = target.rootId === 'bookmarks' || target.rootId === 'toolbar';
+  if (target.rootId === 'bookmarks' || target.rootId === 'toolbar') {
+    if (target.folderId === payload.itemId) return null;
+    if (
+      payload.sourceRootId === target.rootId && target.folderId
+      && isDescendant(snapshot[target.rootId], payload.itemId, target.folderId)
+    ) return null;
+  } else if (!target.itemId) {
+    return null;
+  }
+  return {
+    type: 'moveItem',
+    itemId: payload.itemId,
+    sourceRootId: payload.sourceRootId,
+    targetRootId: target.rootId,
+    ...(treeTarget ? { targetFolderId: target.folderId } : {}),
+    ...(target.itemId && target.position !== 'inside' ? { targetItemId: target.itemId, targetPosition: target.position } : {}),
+  };
+}
+
 export function buildMoveMutation(snapshot: BookmarkSnapshot, draft: BookmarkMoveDraft): BookmarkMutation | null {
   const treeTarget = draft.targetRootId === 'bookmarks' || draft.targetRootId === 'toolbar';
   let targetItemId = draft.targetItemId;

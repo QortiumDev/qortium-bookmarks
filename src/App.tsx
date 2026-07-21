@@ -28,18 +28,27 @@ import {
 import { hashForView, viewFromHash, type BookmarkView } from './appRoute';
 import {
   buildAccountChoices,
+  buildDropMoveMutation,
+  decodeDragPayload,
+  dropTargetFromDataset,
+  encodeDragPayload,
   findTreeItem,
   flattenTree,
   buildMoveMutation,
   friendlyLabelFor,
   getErrorCode,
   isDescendant,
+  isDuplicateDisplayUrl,
+  isInvalidAddressError,
   rootCount,
+  type BookmarkDragPayload,
+  type BookmarkDropTarget,
   type BookmarkFolder,
   type BookmarkMutation,
   type BookmarkSnapshot,
   type BookmarkTreeItem,
   type DashboardPin,
+  type DropPosition,
   type HomeAccountOption,
   type LinkDraft,
   type RootId,
@@ -101,6 +110,11 @@ type MoveEditor = {
 type Editor = LinkEditor | FolderEditor | MoveEditor;
 
 const APP_VERSION = __APP_VERSION__;
+const BOOKMARK_DRAG_MIME = 'application/x-qortium-bookmark';
+const TOUCH_DRAG_DELAY_MS = 420;
+const TOUCH_DRAG_MOVE_CANCEL_PX = 12;
+
+type DropHandler = (payload: BookmarkDragPayload, target: BookmarkDropTarget) => void;
 
 function routeFromLocation(): ViewId {
   return viewFromHash(window.location.hash);
@@ -210,6 +224,122 @@ function QdnPlaceIcon({ address, label, actions, fallback }: { address: string; 
   );
 }
 
+function parseDropTarget(element: Element | null): BookmarkDropTarget | null {
+  const zone = element?.closest<HTMLElement>('[data-drop-root]');
+  return zone ? dropTargetFromDataset(zone.dataset) : null;
+}
+
+/**
+ * Per-row grip that starts a drag: HTML5 drag-and-drop on desktop, and a
+ * long-press pointer drag on touch (activates after a short hold, cancels if
+ * the pointer wanders first, resolves the drop from the release point).
+ */
+function DragHandle({ label, payload, onDrop, onDragActiveChange }: {
+  label: string;
+  payload: BookmarkDragPayload;
+  onDrop: DropHandler;
+  onDragActiveChange: (active: boolean) => void;
+}) {
+  const touchStateRef = useRef<{ isActive: boolean; pointerId: number; startX: number; startY: number; timer: number } | null>(null);
+
+  const startTouchDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse') return;
+    const button = event.currentTarget;
+    const timer = window.setTimeout(() => {
+      const touchState = touchStateRef.current;
+      if (!touchState || touchState.pointerId !== event.pointerId) return;
+      touchState.isActive = true;
+      button.classList.add('drag-handle--active');
+      onDragActiveChange(true);
+    }, TOUCH_DRAG_DELAY_MS);
+    touchStateRef.current = { isActive: false, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, timer };
+    button.setPointerCapture(event.pointerId);
+  };
+
+  const clearTouchDrag = (event: React.PointerEvent<HTMLButtonElement>, shouldDrop: boolean) => {
+    const touchState = touchStateRef.current;
+    if (!touchState || touchState.pointerId !== event.pointerId) return;
+    window.clearTimeout(touchState.timer);
+    event.currentTarget.classList.remove('drag-handle--active');
+    if (shouldDrop && touchState.isActive) {
+      const target = parseDropTarget(document.elementFromPoint(event.clientX, event.clientY));
+      if (target) onDrop(payload, target);
+    }
+    if (touchState.isActive) onDragActiveChange(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    touchStateRef.current = null;
+  };
+
+  return (
+    <button
+      className="drag-handle"
+      type="button"
+      draggable
+      aria-label={label}
+      title={label}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData(BOOKMARK_DRAG_MIME, encodeDragPayload(payload));
+        onDragActiveChange(true);
+      }}
+      onDragEnd={() => onDragActiveChange(false)}
+      onPointerDown={startTouchDrag}
+      onPointerMove={(event) => {
+        const touchState = touchStateRef.current;
+        if (!touchState || touchState.pointerId !== event.pointerId || touchState.isActive) return;
+        if (Math.hypot(event.clientX - touchState.startX, event.clientY - touchState.startY) > TOUCH_DRAG_MOVE_CANCEL_PX) {
+          clearTouchDrag(event, false);
+        }
+      }}
+      onPointerUp={(event) => clearTouchDrag(event, true)}
+      onPointerCancel={(event) => clearTouchDrag(event, false)}
+    >
+      <GripVertical />
+    </button>
+  );
+}
+
+function DropZone({ children, className, folderId, itemId, position = 'after', rootId, onDrop }: {
+  children?: React.ReactNode;
+  className: string;
+  folderId?: string | null;
+  itemId?: string | null;
+  position?: DropPosition;
+  rootId: RootId;
+  onDrop: DropHandler;
+}) {
+  return (
+    <div
+      className={className}
+      data-drop-folder={folderId ?? undefined}
+      data-drop-item={itemId ?? undefined}
+      data-drop-position={position}
+      data-drop-root={rootId}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(BOOKMARK_DRAG_MIME)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        event.currentTarget.classList.add('drop-zone--over');
+      }}
+      onDragLeave={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+          event.currentTarget.classList.remove('drop-zone--over');
+        }
+      }}
+      onDrop={(event) => {
+        event.currentTarget.classList.remove('drop-zone--over');
+        const payload = decodeDragPayload(event.dataTransfer.getData(BOOKMARK_DRAG_MIME));
+        const target = parseDropTarget(event.currentTarget);
+        if (!payload || !target) return;
+        event.preventDefault();
+        onDrop(payload, target);
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function IconButton({ label, onClick, children, danger = false, disabled = false }: { label: string; onClick: () => void; children: React.ReactNode; danger?: boolean; disabled?: boolean }) {
   return (
     <button className={`icon-button${danger ? ' icon-button--danger' : ''}`} type="button" onClick={onClick} aria-label={label} title={label} disabled={disabled}>
@@ -281,8 +411,10 @@ export function App() {
   const [view, setView] = useState<ViewId>(() => routeFromLocation());
   const [query, setQuery] = useState('');
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [editorError, setEditorError] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [isDragActive, setIsDragActive] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const pendingMutation = managerState.pendingMutation;
   const [actions, setActions] = useState<string[]>([]);
@@ -291,7 +423,14 @@ export function App() {
   const loadGuardRef = useRef(new BookmarkLoadGuard());
   const permissionFlightRef = useRef<SingleFlight<void>>({ current: null });
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
-  const closeEditor = useCallback(() => setEditor(null), []);
+  const openEditor = useCallback((next: Editor) => {
+    setEditorError('');
+    setEditor(next);
+  }, []);
+  const closeEditor = useCallback(() => {
+    setEditorError('');
+    setEditor(null);
+  }, []);
 
   const loadSnapshot = useCallback((promptForPermission = false): Promise<void> => {
     if (permissionFlightRef.current.current) return permissionFlightRef.current.current;
@@ -413,12 +552,15 @@ export function App() {
       loadGuardRef.current.observeRevision(result.snapshot.revision);
       dispatchManagerState({ type: 'applied', snapshot: result.snapshot });
       setEditor(null);
+      setEditorError('');
       setNotice(result.changed ? t('status.saved') : t('status.noChanges'));
     } catch (saveError) {
       if (getErrorCode(saveError) === 'HOME_DATA_STALE') {
         dispatchManagerState({ type: 'stale', mutation });
         setNotice(t('error.stale'));
         await loadSnapshot(false);
+      } else if (isInvalidAddressError(saveError)) {
+        setEditorError(t('error.invalidAddress'));
       } else if (isPermissionError(saveError)) {
         setPhase('permission');
         dispatchManagerState({ type: 'clear' });
@@ -439,32 +581,38 @@ export function App() {
     if (pendingMutation) void runMutation(pendingMutation);
   }, [pendingMutation, runMutation]);
 
+  const handleDrop = useCallback<DropHandler>((payload, target) => {
+    if (!snapshot) return;
+    const mutation = buildDropMoveMutation(snapshot, payload, target);
+    if (mutation) void runMutation(mutation);
+  }, [runMutation, snapshot]);
+
   const openItem = useCallback(async (address: string, accountId?: string | null) => {
     const plan = await openSavedAddress(actions, address, accountId);
     if (plan.action === 'ACCOUNT_UNSUPPORTED') setNotice(t('notice.openAccountUnsupported'));
   }, [actions, t]);
 
-  const openAddLink = (rootId: RootId, parentFolderId: string | null = null) => setEditor({
+  const openAddLink = (rootId: RootId, parentFolderId: string | null = null) => openEditor({
     kind: 'link', mode: 'add', rootId, parentFolderId, title: '', displayUrl: '', accountId: '',
   });
 
   const openEditTreeItem = (rootId: TreeRootId, item: BookmarkTreeItem) => {
     if (item.type === 'folder') {
-      setEditor({ kind: 'folder', mode: 'edit', rootId, itemId: item.id, title: item.title });
+      openEditor({ kind: 'folder', mode: 'edit', rootId, itemId: item.id, title: item.title });
     } else {
-      setEditor({
+      openEditor({
         kind: 'link', mode: 'edit', rootId, itemId: item.id, title: item.title,
         displayUrl: item.displayUrl, accountId: item.accountId ?? '',
       });
     }
   };
 
-  const openEditSpecial = (rootId: 'pins' | 'startPages', item: DashboardPin | StartPage) => setEditor({
+  const openEditSpecial = (rootId: 'pins' | 'startPages', item: DashboardPin | StartPage) => openEditor({
     kind: 'link', mode: 'edit', rootId, itemId: specialItemId(item), originalUrl: item.displayUrl,
     title: specialTitle(item), displayUrl: item.displayUrl, accountId: item.accountId ?? '',
   });
 
-  const openMove = (sourceRootId: RootId, itemId: string, isFolder = false) => setEditor({
+  const openMove = (sourceRootId: RootId, itemId: string, isFolder = false) => openEditor({
     kind: 'move', sourceRootId, itemId, isFolder, targetRootId: sourceRootId,
     targetFolderId: '', targetItemId: '', targetPosition: 'after',
   });
@@ -480,34 +628,52 @@ export function App() {
       : { type: 'removeStartPage', displayUrl: item.displayUrl });
   };
 
-  const renderTree = (rootId: TreeRootId, items: BookmarkTreeItem[], depth = 0): React.ReactNode => items
+  const renderTree = (rootId: TreeRootId, items: BookmarkTreeItem[], depth = 0, parentFolderId: string | null = null): React.ReactNode => items
     .filter((item) => itemMatches(item, query))
     .map((item) => (
       <div className="tree-branch" key={item.id}>
-        <article className="item-row" style={{ '--depth': depth } as React.CSSProperties}>
-          <span className="item-row__grip" aria-hidden="true"><GripVertical /></span>
-          <span className={`item-icon${item.type === 'folder' ? ' item-icon--folder' : parseQdnAddress(item.displayUrl) ? ' item-icon--qdn' : ''}`}>
-            {item.type === 'folder'
-              ? <Folder />
-              : <QdnPlaceIcon address={item.displayUrl} label={friendlyLabelFor(item.title, item.displayUrl)} actions={actions} fallback={<Bookmark />} />}
-          </span>
-          <div className="item-row__body">
-            <strong>{item.type === 'folder' ? item.title : friendlyLabelFor(item.title, item.displayUrl)}</strong>
-            <span>{item.type === 'folder' ? t('label.folderItems', { count: item.children.length }) : item.displayUrl}</span>
-            {item.type === 'bookmark' ? <AccountBadge accountId={item.accountId} availableAccounts={snapshot?.availableAccounts ?? []} t={t} /> : null}
-          </div>
-          <div className="item-row__actions">
-            {item.type === 'bookmark' ? <IconButton label={t('aria.openItem', { title: friendlyLabelFor(item.title, item.displayUrl) })} onClick={() => void openItem(item.displayUrl, item.accountId)}><ExternalLink /></IconButton> : null}
-            {item.type === 'folder' ? <>
-              <IconButton label={t('aria.addLinkTo', { title: item.title })} onClick={() => openAddLink(rootId, item.id)}><Plus /></IconButton>
-              <IconButton label={t('aria.addFolderTo', { title: item.title })} onClick={() => setEditor({ kind: 'folder', mode: 'add', rootId, parentFolderId: item.id, title: '' })}><FolderPlus /></IconButton>
-            </> : null}
-            <IconButton label={t('aria.moveItem', { title: item.title })} onClick={() => openMove(rootId, item.id, item.type === 'folder')}><GripVertical /></IconButton>
-            <IconButton label={t('aria.editItem', { title: item.title })} onClick={() => openEditTreeItem(rootId, item)}><Pencil /></IconButton>
-            <IconButton danger label={t('aria.deleteItem', { title: item.title })} onClick={() => removeTreeItem(rootId, item)}><Trash2 /></IconButton>
-          </div>
-        </article>
-        {item.type === 'folder' ? renderTree(rootId, item.children, depth + 1) : null}
+        <div className="drop-row" style={{ '--depth': depth } as React.CSSProperties}>
+          <DropZone className="drop-edge drop-edge--before" rootId={rootId} folderId={parentFolderId} itemId={item.id} position="before" onDrop={handleDrop} />
+          <DropZone
+            className="item-drop"
+            rootId={rootId}
+            folderId={item.type === 'folder' ? item.id : parentFolderId}
+            itemId={item.type === 'folder' ? null : item.id}
+            position={item.type === 'folder' ? 'inside' : 'after'}
+            onDrop={handleDrop}
+          >
+            <article className="item-row">
+              <DragHandle
+                label={t('aria.dragItem', { title: item.type === 'folder' ? item.title : friendlyLabelFor(item.title, item.displayUrl) })}
+                payload={{ itemId: item.id, sourceRootId: rootId }}
+                onDrop={handleDrop}
+                onDragActiveChange={setIsDragActive}
+              />
+              <span className={`item-icon${item.type === 'folder' ? ' item-icon--folder' : parseQdnAddress(item.displayUrl) ? ' item-icon--qdn' : ''}`}>
+                {item.type === 'folder'
+                  ? <Folder />
+                  : <QdnPlaceIcon address={item.displayUrl} label={friendlyLabelFor(item.title, item.displayUrl)} actions={actions} fallback={<Bookmark />} />}
+              </span>
+              <div className="item-row__body">
+                <strong>{item.type === 'folder' ? item.title : friendlyLabelFor(item.title, item.displayUrl)}</strong>
+                <span>{item.type === 'folder' ? t('label.folderItems', { count: item.children.length }) : item.displayUrl}</span>
+                {item.type === 'bookmark' ? <AccountBadge accountId={item.accountId} availableAccounts={snapshot?.availableAccounts ?? []} t={t} /> : null}
+              </div>
+              <div className="item-row__actions">
+                {item.type === 'bookmark' ? <IconButton label={t('aria.openItem', { title: friendlyLabelFor(item.title, item.displayUrl) })} onClick={() => void openItem(item.displayUrl, item.accountId)}><ExternalLink /></IconButton> : null}
+                {item.type === 'folder' ? <>
+                  <IconButton label={t('aria.addLinkTo', { title: item.title })} onClick={() => openAddLink(rootId, item.id)}><Plus /></IconButton>
+                  <IconButton label={t('aria.addFolderTo', { title: item.title })} onClick={() => openEditor({ kind: 'folder', mode: 'add', rootId, parentFolderId: item.id, title: '' })}><FolderPlus /></IconButton>
+                </> : null}
+                <IconButton label={t('aria.moveItem', { title: item.title })} onClick={() => openMove(rootId, item.id, item.type === 'folder')}><GripVertical /></IconButton>
+                <IconButton label={t('aria.editItem', { title: item.title })} onClick={() => openEditTreeItem(rootId, item)}><Pencil /></IconButton>
+                <IconButton danger label={t('aria.deleteItem', { title: item.title })} onClick={() => removeTreeItem(rootId, item)}><Trash2 /></IconButton>
+              </div>
+            </article>
+          </DropZone>
+          <DropZone className="drop-edge drop-edge--after" rootId={rootId} folderId={parentFolderId} itemId={item.id} position="after" onDrop={handleDrop} />
+        </div>
+        {item.type === 'folder' ? renderTree(rootId, item.children, depth + 1, item.id) : null}
       </div>
     ));
 
@@ -564,6 +730,17 @@ export function App() {
     if (editor.kind === 'move') {
       if (preparedMoveMutation) void runMutation(preparedMoveMutation);
       else { setEditor(null); setNotice(t('status.noChanges')); }
+      return;
+    }
+    // Home enforces the duplicate rule; this pre-check only turns its generic
+    // changed:false round-trip into a specific message the editor can show.
+    if (snapshot && isDuplicateDisplayUrl(snapshot, {
+      rootId: editor.rootId,
+      mode: editor.mode,
+      parentFolderId: editor.parentFolderId ?? null,
+      itemId: editor.mode === 'edit' ? editor.itemId : null,
+    }, editor.displayUrl)) {
+      setEditorError(t(editor.rootId === 'bookmarks' || editor.rootId === 'toolbar' ? 'error.duplicateFolder' : 'error.duplicateList'));
       return;
     }
     const draft: LinkDraft = { title: editor.title, displayUrl: editor.displayUrl, accountId: editor.accountId.trim() || null };
@@ -626,7 +803,7 @@ export function App() {
               <div><h2>{view === 'pins' ? t('label.dashboardPins') : view === 'startPages' ? t('label.startPages') : view === 'toolbar' ? t('label.toolbar') : t('label.bookmarks')}</h2><p>{t('label.items', { count: currentCount })}</p></div>
               <div className="content-toolbar__actions">
                 <label className="search-field"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('field.searchBookmarks')} aria-label={t('field.searchBookmarks')} /></label>
-                {(view === 'bookmarks' || view === 'toolbar') ? <button className="button" type="button" onClick={() => setEditor({ kind: 'folder', mode: 'add', rootId: view, title: '' })}><Folder />{t('action.addFolder')}</button> : null}
+                {(view === 'bookmarks' || view === 'toolbar') ? <button className="button" type="button" onClick={() => openEditor({ kind: 'folder', mode: 'add', rootId: view, title: '' })}><Folder />{t('action.addFolder')}</button> : null}
                 <button className="button button--primary" type="button" onClick={() => openAddLink(view === 'pins' ? 'pins' : view)}><Plus />{t('action.addLink')}</button>
               </div>
             </div>
@@ -643,27 +820,41 @@ export function App() {
             {notice ? <div className="notice"><span>{notice}</span>{pendingMutation ? <button className="button" type="button" onClick={retryMutation}>{t('action.retry')}</button> : null}</div> : null}
             {isSaving ? <div className="save-line" role="status"><LoaderCircle className="spinner" />{t('status.saving')}</div> : null}
 
-            <div className="item-list">
+            <div className={`item-list${isDragActive ? ' item-list--dragging' : ''}`}>
               {(view === 'bookmarks' || view === 'toolbar') ? renderTree(view, currentTree) : null}
-              {(view === 'pins' || view === 'startPages') ? visibleSpecial.map((item) => (
-                <article className="item-row" key={specialItemId(item)}>
-                  <span className="item-row__grip" aria-hidden="true"><GripVertical /></span>
-                  <span className={`item-icon${parseQdnAddress(item.displayUrl) ? ' item-icon--qdn' : ''}`}>
-                    <QdnPlaceIcon address={item.displayUrl} label={specialTitle(item)} actions={actions} fallback={view === 'pins' ? <Pin /> : <Home />} />
-                  </span>
-                  <div className="item-row__body">
-                    <strong>{specialTitle(item)}</strong>
-                    <span>{item.displayUrl}</span>
-                    <AccountBadge accountId={item.accountId} availableAccounts={snapshot?.availableAccounts ?? []} t={t} />
+              {(view === 'pins' || view === 'startPages') ? visibleSpecial.map((item) => {
+                const rootId = view === 'pins' ? 'pins' : 'startPages';
+                return (
+                  <div className="drop-row" key={specialItemId(item)}>
+                    <DropZone className="drop-edge drop-edge--before" rootId={rootId} itemId={specialItemId(item)} position="before" onDrop={handleDrop} />
+                    <DropZone className="item-drop" rootId={rootId} itemId={specialItemId(item)} position="after" onDrop={handleDrop}>
+                      <article className="item-row">
+                        <DragHandle
+                          label={t('aria.dragItem', { title: specialTitle(item) })}
+                          payload={{ itemId: specialItemId(item), sourceRootId: rootId }}
+                          onDrop={handleDrop}
+                          onDragActiveChange={setIsDragActive}
+                        />
+                        <span className={`item-icon${parseQdnAddress(item.displayUrl) ? ' item-icon--qdn' : ''}`}>
+                          <QdnPlaceIcon address={item.displayUrl} label={specialTitle(item)} actions={actions} fallback={view === 'pins' ? <Pin /> : <Home />} />
+                        </span>
+                        <div className="item-row__body">
+                          <strong>{specialTitle(item)}</strong>
+                          <span>{item.displayUrl}</span>
+                          <AccountBadge accountId={item.accountId} availableAccounts={snapshot?.availableAccounts ?? []} t={t} />
+                        </div>
+                        <div className="item-row__actions">
+                          <IconButton label={t('aria.openItem', { title: specialTitle(item) })} onClick={() => void openItem(item.displayUrl, item.accountId)}><ExternalLink /></IconButton>
+                          <IconButton label={t('aria.moveItem', { title: specialTitle(item) })} onClick={() => openMove(rootId, specialItemId(item))}><GripVertical /></IconButton>
+                          <IconButton label={t('aria.editItem', { title: specialTitle(item) })} onClick={() => openEditSpecial(rootId, item)}><Pencil /></IconButton>
+                          <IconButton danger label={t('aria.deleteItem', { title: specialTitle(item) })} onClick={() => removeSpecial(rootId, item)}><Trash2 /></IconButton>
+                        </div>
+                      </article>
+                    </DropZone>
+                    <DropZone className="drop-edge drop-edge--after" rootId={rootId} itemId={specialItemId(item)} position="after" onDrop={handleDrop} />
                   </div>
-                  <div className="item-row__actions">
-                    <IconButton label={t('aria.openItem', { title: specialTitle(item) })} onClick={() => void openItem(item.displayUrl, item.accountId)}><ExternalLink /></IconButton>
-                    <IconButton label={t('aria.moveItem', { title: specialTitle(item) })} onClick={() => openMove(view === 'pins' ? 'pins' : 'startPages', specialItemId(item))}><GripVertical /></IconButton>
-                    <IconButton label={t('aria.editItem', { title: specialTitle(item) })} onClick={() => openEditSpecial(view === 'pins' ? 'pins' : 'startPages', item)}><Pencil /></IconButton>
-                    <IconButton danger label={t('aria.deleteItem', { title: specialTitle(item) })} onClick={() => removeSpecial(view === 'pins' ? 'pins' : 'startPages', item)}><Trash2 /></IconButton>
-                  </div>
-                </article>
-              )) : null}
+                );
+              }) : null}
               {currentCount === 0 ? <EmptyState icon={view === 'pins' ? <Pin /> : view === 'startPages' ? <Home /> : view === 'toolbar' ? <LinkIcon /> : <Bookmark />}>
                 {view === 'pins' ? t('empty.pins') : view === 'startPages' ? t('empty.startPages') : view === 'toolbar' ? t('empty.toolbar') : t('empty.bookmarks')}
               </EmptyState> : null}
@@ -679,7 +870,7 @@ export function App() {
             {editor.kind === 'folder' ? <label>{t('field.title')}<input autoFocus required value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label> : null}
             {editor.kind === 'link' ? <>
               <label>{t('field.title')}<input autoFocus required value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
-              <label>{t('field.address')}<input required value={editor.displayUrl} onChange={(event) => setEditor({ ...editor, displayUrl: event.target.value })} placeholder={t('field.addressPlaceholder')} /></label>
+              <label>{t('field.address')}<input required value={editor.displayUrl} onChange={(event) => { setEditorError(''); setEditor({ ...editor, displayUrl: event.target.value }); }} placeholder={t('field.addressPlaceholder')} /></label>
               <label>{t('field.account')} <small>({t('label.optional')})</small>
                 <select value={editor.accountId} onChange={(event) => setEditor({ ...editor, accountId: event.target.value })}>
                   <option value="">{t('label.currentAccount')}</option>
@@ -703,6 +894,7 @@ export function App() {
               </select></label>
               {editor.targetItemId ? <div className="segmented"><button type="button" className={editor.targetPosition === 'before' ? 'active' : ''} onClick={() => setEditor({ ...editor, targetPosition: 'before' })}>{t('move.before')}</button><button type="button" className={editor.targetPosition === 'after' ? 'active' : ''} onClick={() => setEditor({ ...editor, targetPosition: 'after' })}>{t('move.after')}</button></div> : null}
             </> : null}
+            {editorError ? <div className="notice notice--error">{editorError}</div> : null}
             <footer className="modal__footer"><button className="button" type="button" onClick={closeEditor}>{t('action.cancel')}</button><button className="button button--primary" type="submit" disabled={isSaving || (editor.kind === 'move' && !preparedMoveMutation)}>{t('action.save')}</button></footer>
           </form>
         </Modal>

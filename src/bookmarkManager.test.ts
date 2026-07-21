@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   countTreeItems,
   buildAccountChoices,
+  buildDropMoveMutation,
   buildMoveMutation,
+  decodeDragPayload,
+  dropTargetFromDataset,
+  encodeDragPayload,
   findTreeItem,
   flattenTree,
   friendlyLabelFor,
   getErrorCode,
   isDescendant,
+  isDuplicateDisplayUrl,
+  isInvalidAddressError,
   parseBookmarkSnapshot,
   qdnNameFromAddress,
   rootCount,
@@ -122,6 +128,132 @@ describe('account choices', () => {
   it('adds no unavailable choice when nothing was saved', () => {
     expect(buildAccountChoices([{ id: 'a', label: 'Main' }], null)).toEqual([{ id: 'a', label: 'Main' }]);
     expect(buildAccountChoices([{ id: 'a', label: 'Main' }], '')).toEqual([{ id: 'a', label: 'Main' }]);
+  });
+});
+
+describe('drag-and-drop move building', () => {
+  const treeSnapshot: BookmarkSnapshot = {
+    ...snapshot,
+    bookmarks: [
+      {
+        type: 'folder', id: 'folder-a', title: 'Apps', createdAt: 1,
+        children: [
+          { type: 'bookmark', id: 'boards', title: 'Boards', displayUrl: 'qdn://APP/Boards/Boards', createdAt: 2 },
+          { type: 'folder', id: 'folder-b', title: 'Nested', createdAt: 3, children: [] },
+        ],
+      },
+      { type: 'bookmark', id: 'chat', title: 'Chat', displayUrl: 'qdn://APP/Chat/Chat', createdAt: 4 },
+    ],
+  };
+
+  it('round-trips the drag payload and rejects malformed payload data', () => {
+    const payload = { itemId: 'boards', sourceRootId: 'bookmarks' } as const;
+    expect(decodeDragPayload(encodeDragPayload(payload))).toEqual(payload);
+    expect(decodeDragPayload('not json')).toBeNull();
+    expect(decodeDragPayload(JSON.stringify({ itemId: 'boards', sourceRootId: 'desktop' }))).toBeNull();
+    expect(decodeDragPayload(JSON.stringify({ sourceRootId: 'bookmarks' }))).toBeNull();
+  });
+
+  it('parses drop targets from data attributes and rejects unknown roots', () => {
+    expect(dropTargetFromDataset({ dropRoot: 'bookmarks', dropFolder: 'folder-a', dropItem: 'boards', dropPosition: 'before' }))
+      .toEqual({ rootId: 'bookmarks', folderId: 'folder-a', itemId: 'boards', position: 'before' });
+    expect(dropTargetFromDataset({ dropRoot: 'pins', dropItem: 'chat' }))
+      .toEqual({ rootId: 'pins', folderId: null, itemId: 'chat', position: 'after' });
+    expect(dropTargetFromDataset({ dropRoot: 'desktop', dropItem: 'boards' })).toBeNull();
+    expect(dropTargetFromDataset({})).toBeNull();
+  });
+
+  it('builds a before/after move relative to a sibling in the same folder', () => {
+    expect(buildDropMoveMutation(treeSnapshot, { itemId: 'chat', sourceRootId: 'bookmarks' }, {
+      rootId: 'bookmarks', folderId: 'folder-a', itemId: 'boards', position: 'before',
+    })).toEqual({
+      type: 'moveItem', itemId: 'chat', sourceRootId: 'bookmarks', targetRootId: 'bookmarks',
+      targetFolderId: 'folder-a', targetItemId: 'boards', targetPosition: 'before',
+    });
+  });
+
+  it('builds an inside-folder move that appends without a target item', () => {
+    expect(buildDropMoveMutation(treeSnapshot, { itemId: 'chat', sourceRootId: 'bookmarks' }, {
+      rootId: 'bookmarks', folderId: 'folder-a', itemId: null, position: 'inside',
+    })).toEqual({
+      type: 'moveItem', itemId: 'chat', sourceRootId: 'bookmarks', targetRootId: 'bookmarks', targetFolderId: 'folder-a',
+    });
+  });
+
+  it('refuses dropping an item onto itself or a folder into its own subtree', () => {
+    expect(buildDropMoveMutation(treeSnapshot, { itemId: 'chat', sourceRootId: 'bookmarks' }, {
+      rootId: 'bookmarks', folderId: null, itemId: 'chat', position: 'after',
+    })).toBeNull();
+    expect(buildDropMoveMutation(treeSnapshot, { itemId: 'folder-a', sourceRootId: 'bookmarks' }, {
+      rootId: 'bookmarks', folderId: 'folder-a', itemId: null, position: 'inside',
+    })).toBeNull();
+    expect(buildDropMoveMutation(treeSnapshot, { itemId: 'folder-a', sourceRootId: 'bookmarks' }, {
+      rootId: 'bookmarks', folderId: 'folder-b', itemId: null, position: 'inside',
+    })).toBeNull();
+  });
+
+  it('builds flat-list moves for pins and requires a sibling row there', () => {
+    expect(buildDropMoveMutation(snapshot, { itemId: 'chat', sourceRootId: 'pins' }, {
+      rootId: 'pins', folderId: null, itemId: 'other-pin', position: 'after',
+    })).toEqual({
+      type: 'moveItem', itemId: 'chat', sourceRootId: 'pins', targetRootId: 'pins',
+      targetItemId: 'other-pin', targetPosition: 'after',
+    });
+    expect(buildDropMoveMutation(snapshot, { itemId: 'chat', sourceRootId: 'pins' }, {
+      rootId: 'pins', folderId: null, itemId: null, position: 'after',
+    })).toBeNull();
+  });
+});
+
+describe('duplicate address pre-check', () => {
+  const duplicateSnapshot: BookmarkSnapshot = {
+    ...snapshot,
+    bookmarks: [
+      {
+        type: 'folder', id: 'folder-a', title: 'Apps', createdAt: 1,
+        children: [{ type: 'bookmark', id: 'boards', title: 'Boards', displayUrl: 'qdn://APP/Boards/Boards', createdAt: 2 }],
+      },
+      { type: 'bookmark', id: 'chat', title: 'Chat', displayUrl: 'qdn://APP/Chat/Chat', createdAt: 3 },
+    ],
+  };
+
+  it('flags a trimmed duplicate only within the same target folder', () => {
+    expect(isDuplicateDisplayUrl(duplicateSnapshot, { rootId: 'bookmarks', mode: 'add', parentFolderId: 'folder-a' }, '  qdn://APP/Boards/Boards  ')).toBe(true);
+    expect(isDuplicateDisplayUrl(duplicateSnapshot, { rootId: 'bookmarks', mode: 'add', parentFolderId: null }, 'qdn://APP/Boards/Boards')).toBe(false);
+    expect(isDuplicateDisplayUrl(duplicateSnapshot, { rootId: 'bookmarks', mode: 'add', parentFolderId: null }, 'qdn://APP/Chat/Chat')).toBe(true);
+  });
+
+  it('lets an edit keep its own address but not take a sibling one', () => {
+    expect(isDuplicateDisplayUrl(duplicateSnapshot, { rootId: 'bookmarks', mode: 'edit', itemId: 'boards' }, 'qdn://APP/Boards/Boards')).toBe(false);
+    const twoLinks: BookmarkSnapshot = {
+      ...duplicateSnapshot,
+      bookmarks: [
+        { type: 'bookmark', id: 'chat', title: 'Chat', displayUrl: 'qdn://APP/Chat/Chat', createdAt: 1 },
+        { type: 'bookmark', id: 'help', title: 'Help', displayUrl: 'qdn://APP/Help/Help', createdAt: 2 },
+      ],
+    };
+    expect(isDuplicateDisplayUrl(twoLinks, { rootId: 'bookmarks', mode: 'edit', itemId: 'help' }, 'qdn://APP/Chat/Chat')).toBe(true);
+  });
+
+  it('checks pins and start pages against their whole list', () => {
+    expect(isDuplicateDisplayUrl(snapshot, { rootId: 'pins', mode: 'add' }, 'qdn://APP/Chat/Chat')).toBe(true);
+    expect(isDuplicateDisplayUrl(snapshot, { rootId: 'pins', mode: 'edit', itemId: 'chat' }, 'qdn://APP/Chat/Chat')).toBe(false);
+    expect(isDuplicateDisplayUrl(snapshot, { rootId: 'startPages', mode: 'add' }, 'home://dashboard')).toBe(true);
+    expect(isDuplicateDisplayUrl(snapshot, { rootId: 'startPages', mode: 'edit', itemId: 'home://dashboard' }, 'home://dashboard')).toBe(false);
+    expect(isDuplicateDisplayUrl(snapshot, { rootId: 'startPages', mode: 'add' }, 'home://settings')).toBe(false);
+  });
+
+  it('never flags a blank address; Home handles empty input', () => {
+    expect(isDuplicateDisplayUrl(snapshot, { rootId: 'pins', mode: 'add' }, '   ')).toBe(false);
+  });
+});
+
+describe('invalid address error mapping', () => {
+  it('recognizes INVALID_ADDRESS from direct and bridged errors only', () => {
+    expect(isInvalidAddressError({ code: 'INVALID_ADDRESS' })).toBe(true);
+    expect(isInvalidAddressError({ cause: { code: 'INVALID_ADDRESS' } })).toBe(true);
+    expect(isInvalidAddressError({ code: 'HOME_DATA_STALE' })).toBe(false);
+    expect(isInvalidAddressError(new Error('INVALID_ADDRESS'))).toBe(false);
   });
 });
 
