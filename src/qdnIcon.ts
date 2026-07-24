@@ -12,7 +12,6 @@ export type IconCandidate = {
 };
 
 const QDN_ADDRESS_PATTERN = /^qdn:\/\/(app|website)\/([^/?#]+)(?:\/([^/?#]+))?/i;
-const AVATAR_IDENTIFIER = 'avatar';
 
 function decodeSegment(value: string) {
   try {
@@ -34,8 +33,8 @@ export function parseQdnAddress(displayUrl: string): QdnAddress | null {
 }
 
 /**
- * Established icon fallback order: the resource's own favicon.ico, then the
- * publisher's THUMBNAIL avatar, then (handled by the caller) a name monogram.
+ * App resources own their favicon. The caller uses the publisher's pointer-aware
+ * account avatar only if this favicon cannot be resolved.
  */
 export function buildIconCandidates(address: QdnAddress): IconCandidate[] {
   return [
@@ -45,7 +44,6 @@ export function buildIconCandidates(address: QdnAddress): IconCandidate[] {
       path: 'favicon.ico',
       ...(address.identifier ? { identifier: address.identifier } : {}),
     },
-    { service: 'THUMBNAIL', name: address.name, identifier: AVATAR_IDENTIFIER },
   ];
 }
 

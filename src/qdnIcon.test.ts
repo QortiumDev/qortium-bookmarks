@@ -24,17 +24,15 @@ describe('parseQdnAddress', () => {
 });
 
 describe('buildIconCandidates', () => {
-  it('orders favicon.ico before the publisher THUMBNAIL avatar', () => {
+  it('keeps the resource favicon as the only direct QDN icon candidate', () => {
     expect(buildIconCandidates({ service: 'APP', name: 'Help', identifier: 'Help' })).toEqual([
       { service: 'APP', name: 'Help', path: 'favicon.ico', identifier: 'Help' },
-      { service: 'THUMBNAIL', name: 'Help', identifier: 'avatar' },
     ]);
   });
 
   it('omits the identifier field for name-only addresses', () => {
     expect(buildIconCandidates({ service: 'WEBSITE', name: 'Node', identifier: null })).toEqual([
       { service: 'WEBSITE', name: 'Node', path: 'favicon.ico' },
-      { service: 'THUMBNAIL', name: 'Node', identifier: 'avatar' },
     ]);
   });
 });
@@ -72,13 +70,13 @@ describe('resolveQdnIconUrl', () => {
     expect(url).toBe('resolved:APP:favicon.ico');
   });
 
-  it('falls back to the THUMBNAIL avatar when the favicon fails to load', async () => {
+  it('returns null for a failed favicon so the caller can try the pointer-aware publisher avatar', async () => {
     const url = await resolveQdnIconUrl(
       candidates,
       async (candidate) => `resolved:${candidate.service}:${candidate.path ?? candidate.identifier}`,
-      async (url) => url.includes('THUMBNAIL'),
+      async () => false,
     );
-    expect(url).toBe('resolved:THUMBNAIL:avatar');
+    expect(url).toBeNull();
   });
 
   it('returns null (signalling the monogram) once every candidate fails', async () => {
@@ -91,11 +89,11 @@ describe('resolveQdnIconUrl', () => {
       candidates,
       async (candidate) => {
         if (candidate.path === 'favicon.ico') throw new Error('boom');
-        return 'resolved:avatar';
+        return 'resolved:favicon.ico';
       },
       async () => true,
     );
-    expect(url).toBe('resolved:avatar');
+    expect(url).toBeNull();
   });
 });
 
