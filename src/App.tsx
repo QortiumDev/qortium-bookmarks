@@ -72,6 +72,7 @@ import {
   parseQdnAddress,
   resolveQdnIconUrl,
 } from './qdnIcon';
+import { fetchPublisherAvatar } from './publisherAvatar';
 import { hasAction, qdnRequest } from './qdnRequest';
 import { bookmarkManagerStateReducer, INITIAL_BOOKMARK_MANAGER_STATE, shouldRefreshForRevision } from './bookmarkState';
 import { BookmarkLoadGuard, runSingleFlight, type SingleFlight } from './bookmarkLoadGuard';
@@ -166,12 +167,17 @@ function AccountBadge({ accountId, availableAccounts, t }: { accountId?: string 
 function QdnPlaceIcon({ address, label, actions, fallback }: { address: string; label: string; actions: string[]; fallback: React.ReactNode }) {
   const parsed = useMemo(() => parseQdnAddress(address), [address]);
   const [iconUrl, setIconUrl] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [visible, setVisible] = useState(false);
   const hostRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     setIconUrl(null);
+    setAvatarUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
     setFailed(false);
     setVisible(false);
   }, [address]);
@@ -191,34 +197,72 @@ function QdnPlaceIcon({ address, label, actions, fallback }: { address: string; 
   }, [visible]);
 
   useEffect(() => {
-    if (!visible || !parsed || !hasAction(actions, QDN_RESOURCE_URL_ACTION)) return;
+    if (!visible || !parsed) return;
     let cancelled = false;
-    const candidates = buildIconCandidates(parsed);
-    void getCachedQdnIconUrl(iconCacheKeyFor(parsed), () => resolveQdnIconUrl(
-      candidates,
-      async (candidate) => {
-        const url = await qdnRequest<unknown>({ action: QDN_RESOURCE_URL_ACTION, ...candidate });
-        return typeof url === 'string' && url ? url : null;
-      },
-      (url) => new Promise((resolve) => {
-        const image = new window.Image();
-        image.onload = () => resolve(true);
-        image.onerror = () => resolve(false);
-        image.src = url;
-      }),
-    )).then((url) => {
+    setFailed(false);
+    let retryTimer: number | undefined;
+    let objectUrl: string | null = null;
+
+    const loadPublisherAvatar = async (attempts = 0): Promise<void> => {
+      const avatar = await fetchPublisherAvatar(parsed.name, actions);
+
       if (cancelled) return;
-      if (url) setIconUrl(url);
-      else setFailed(true);
-    });
-    return () => { cancelled = true; };
+
+      if (avatar.kind === 'pending' && attempts < 3) {
+        retryTimer = window.setTimeout(() => void loadPublisherAvatar(attempts + 1), avatar.retryAfterSeconds * 1000);
+        return;
+      }
+
+      if (avatar.kind === 'ready') {
+        const bytes = new Uint8Array(avatar.bytes.byteLength);
+        bytes.set(avatar.bytes);
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: avatar.contentType }));
+        setAvatarUrl(objectUrl);
+      } else {
+        setFailed(true);
+      }
+    };
+
+    const load = async () => {
+      if (hasAction(actions, QDN_RESOURCE_URL_ACTION)) {
+        const candidates = buildIconCandidates(parsed);
+        const url = await getCachedQdnIconUrl(iconCacheKeyFor(parsed), () => resolveQdnIconUrl(
+          candidates,
+          async (candidate) => {
+            const response = await qdnRequest<unknown>({ action: QDN_RESOURCE_URL_ACTION, ...candidate });
+            return typeof response === 'string' && response ? response : null;
+          },
+          (candidateUrl) => new Promise((resolve) => {
+            const image = new window.Image();
+            image.onload = () => resolve(true);
+            image.onerror = () => resolve(false);
+            image.src = candidateUrl;
+          }),
+        ));
+
+        if (cancelled) return;
+        if (url) {
+          setIconUrl(url);
+          return;
+        }
+      }
+
+      await loadPublisherAvatar();
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [visible, parsed, actions]);
 
   if (!parsed) return <>{fallback}</>;
   return (
     <span className="item-icon__media" ref={hostRef}>
-      {iconUrl && !failed
-        ? <img src={iconUrl} alt="" loading="lazy" onError={() => setFailed(true)} />
+      {(iconUrl ?? avatarUrl) && !failed
+        ? <img src={iconUrl ?? avatarUrl ?? undefined} alt="" loading="lazy" onError={() => setFailed(true)} />
         : <span className="item-icon__monogram" aria-hidden="true">{monogramFor(label)}</span>}
     </span>
   );
