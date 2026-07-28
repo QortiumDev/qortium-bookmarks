@@ -10,10 +10,17 @@ import {
 } from './qdnIcon';
 
 describe('parseQdnAddress', () => {
-  it('parses APP and WEBSITE addresses with and without an identifier', () => {
+  it('parses APP, WEBSITE and GAME addresses with and without an identifier', () => {
     expect(parseQdnAddress('qdn://APP/Help/Help')).toEqual({ service: 'APP', name: 'Help', identifier: 'Help' });
     expect(parseQdnAddress('qdn://WEBSITE/Node')).toEqual({ service: 'WEBSITE', name: 'Node', identifier: null });
     expect(parseQdnAddress('qdn://app/trust/trust')).toEqual({ service: 'APP', name: 'trust', identifier: 'trust' });
+    // GAME is hosted as browser content like APP and WEBSITE, so it is bookmarkable too.
+    expect(parseQdnAddress('qdn://GAME/QortiumHomeTest/shell-game')).toEqual({
+      service: 'GAME',
+      name: 'QortiumHomeTest',
+      identifier: 'shell-game',
+    });
+    expect(parseQdnAddress('qdn://game/QortiumHomeTest/shell-game')?.service).toBe('GAME');
   });
 
   it('returns null for non-QDN addresses so folder/Home/Core icons stay generic', () => {

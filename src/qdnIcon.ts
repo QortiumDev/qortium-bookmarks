@@ -1,7 +1,7 @@
 export type QdnAddress = {
   identifier: string | null;
   name: string;
-  service: 'APP' | 'WEBSITE';
+  service: 'APP' | 'WEBSITE' | 'GAME';
 };
 
 export type IconCandidate = {
@@ -11,7 +11,10 @@ export type IconCandidate = {
   service: string;
 };
 
-const QDN_ADDRESS_PATTERN = /^qdn:\/\/(app|website)\/([^/?#]+)(?:\/([^/?#]+))?/i;
+// APP, WEBSITE and GAME are the services Home hosts as browser content, so all
+// three can be bookmarked as openable resources. Keep in parity with
+// qortium-home/electron/qdn-browser-archive-services.ts.
+const QDN_ADDRESS_PATTERN = /^qdn:\/\/(app|website|game)\/([^/?#]+)(?:\/([^/?#]+))?/i;
 
 function decodeSegment(value: string) {
   try {
@@ -26,7 +29,7 @@ export function parseQdnAddress(displayUrl: string): QdnAddress | null {
   const match = QDN_ADDRESS_PATTERN.exec(displayUrl.trim());
   if (!match) return null;
   return {
-    service: match[1].toUpperCase() as 'APP' | 'WEBSITE',
+    service: match[1].toUpperCase() as QdnAddress['service'],
     name: decodeSegment(match[2]),
     identifier: match[3] ? decodeSegment(match[3]) : null,
   };
