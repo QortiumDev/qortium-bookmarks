@@ -47,6 +47,7 @@ export const EN_STRINGS = {
   'label.bookmarksAccess': 'Bookmarks access',
   'label.currentAccount': 'Current',
   'label.dashboard': 'Dashboard only',
+  'label.developers': 'Developers',
   'label.dashboardPins': 'Dashboard pins',
   'label.folder': 'Folder',
   'label.folderItems': '{count} items',

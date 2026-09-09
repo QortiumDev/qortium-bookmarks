@@ -1,9 +1,12 @@
+export const BOOKMARK_SCHEMA_VERSION = 1 as const;
+export const MAX_PARSE_TREE_DEPTH = 32;
+export const TOOLBAR_VISIBILITY = ['hidden', 'dashboard', 'always'] as const;
 export const TREE_ROOT_IDS = ['bookmarks', 'toolbar'] as const;
 export const ROOT_IDS = ['bookmarks', 'toolbar', 'pins', 'startPages'] as const;
 
 export type TreeRootId = (typeof TREE_ROOT_IDS)[number];
 export type RootId = (typeof ROOT_IDS)[number];
-export type ToolbarVisibility = 'hidden' | 'dashboard' | 'always';
+export type ToolbarVisibility = typeof TOOLBAR_VISIBILITY[number];
 export type DropPosition = 'before' | 'after' | 'inside';
 
 export type BookmarkLink = {
@@ -51,7 +54,7 @@ export type BookmarkSnapshot = {
   bookmarks: BookmarkTreeItem[];
   dashboardPins: DashboardPin[];
   revision: number;
-  schemaVersion: 1;
+  schemaVersion: typeof BOOKMARK_SCHEMA_VERSION;
   startPages: StartPage[];
   toolbar: BookmarkTreeItem[];
   toolbarVisibility: ToolbarVisibility;
@@ -113,7 +116,7 @@ function requireString(value: unknown, field: string) {
 }
 
 function parseTreeItem(value: unknown, depth = 0): BookmarkTreeItem {
-  if (!isRecord(value) || depth > 32) throw new Error('Bookmark tree is invalid.');
+  if (!isRecord(value) || depth > MAX_PARSE_TREE_DEPTH) throw new Error('Bookmark tree is invalid.');
   const type = value.type;
   const base = {
     createdAt: typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : 0,
@@ -135,18 +138,18 @@ function parseTreeItem(value: unknown, depth = 0): BookmarkTreeItem {
 
 export function parseBookmarkSnapshot(value: unknown): BookmarkSnapshot {
   if (!isRecord(value)) throw new Error('Home returned an invalid bookmark response.');
-  if (value.schemaVersion !== 1 || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0) {
+  if (value.schemaVersion !== BOOKMARK_SCHEMA_VERSION || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0) {
     throw new Error('Home returned an unsupported bookmark response.');
   }
   if (!Array.isArray(value.bookmarks) || !Array.isArray(value.toolbar) || !Array.isArray(value.dashboardPins) || !Array.isArray(value.startPages)) {
     throw new Error('Home returned incomplete bookmark data.');
   }
-  if (!['hidden', 'dashboard', 'always'].includes(String(value.toolbarVisibility))) {
+  if (!TOOLBAR_VISIBILITY.includes(String(value.toolbarVisibility) as ToolbarVisibility)) {
     throw new Error('Home returned an invalid toolbar setting.');
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: BOOKMARK_SCHEMA_VERSION,
     revision: value.revision as number,
     bookmarks: value.bookmarks.map((item) => parseTreeItem(item)),
     toolbar: value.toolbar.map((item) => parseTreeItem(item)),
