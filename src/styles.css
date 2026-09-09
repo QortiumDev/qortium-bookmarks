@@ -99,7 +99,7 @@ svg { width: 1.15em; height: 1.15em; stroke-width: 2; }
 .version { color: var(--qb-muted); font-family: "Illinois Mono", monospace; font-size: var(--qb-small); }
 
 .workspace { display: grid; gap: 14px; margin: 0 auto; max-width: 1240px; }
-.tabs { background: var(--qb-surface); border: 1px solid var(--qb-border); border-radius: 10px; box-shadow: var(--qb-shadow); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; }
+.tabs { background: var(--qb-surface); border: 1px solid var(--qb-border); border-radius: 10px; box-shadow: var(--qb-shadow); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: hidden; }
 .tab { align-items: center; background: transparent; border: 0; border-inline-end: 1px solid var(--qb-border); color: var(--qb-text-secondary); display: flex; gap: 8px; min-height: 52px; padding: 10px 14px; text-align: start; }
 .tab:last-child { border-inline-end: 0; }
 .tab:hover { background: var(--qb-control); }
@@ -185,7 +185,8 @@ select, .editor-form input { background: var(--qb-surface); border: 1px solid va
   .app-header { margin-bottom: 12px; }
   .brand p, .version { display: none; }
   .brand__icon { height: 42px; width: 42px; }
-  .tabs { grid-template-columns: repeat(4, 1fr); }
+  .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tab:last-child { grid-column: 1 / -1; }
   .tab { flex-direction: column; gap: 3px; min-height: 64px; padding: 7px 3px; text-align: center; }
   .tab span { font-size: var(--qb-small); }
   .tab small { display: none; }
@@ -200,7 +201,7 @@ select, .editor-form input { background: var(--qb-surface); border: 1px solid va
 
 @media (max-width: 440px) {
   .brand h1 { font-size: calc(22px * var(--qb-scale)); }
-  .tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab span { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
   .content-toolbar__actions { grid-template-columns: 1fr; }
   .search-field { grid-column: auto; }
   .setting-row { align-items: stretch; flex-direction: column; }
@@ -208,3 +209,23 @@ select, .editor-form input { background: var(--qb-surface); border: 1px solid va
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } .spinner { animation-duration: 1.8s; } }
+
+/* Developers shares the app appearance; only its content scrolls for sections. */
+.workspace-navigation { margin-bottom: 14px; }
+.reference { max-width: 1240px; margin: 0 auto; min-width: 0; }
+.reference-header { padding: 16px; }
+.reference-header h2 { margin: 0 0 8px; font-size: var(--qb-heading); }
+.reference-toc { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 0; }
+.reference a { color: var(--qb-accent); overflow-wrap: anywhere; }
+.reference a:focus-visible, .reference section:focus-visible { outline: 3px solid var(--qb-accent); outline-offset: 2px; }
+.reference-scroll { max-height: 65dvh; min-height: 220px; overflow: auto; overscroll-behavior: contain; padding: 16px; border-top: 1px solid var(--qb-border); }
+.reference section { scroll-margin-top: 12px; margin-bottom: 32px; min-width: 0; }
+.reference h3 { font-size: 1.2em; margin-top: 0; }
+.reference p, .reference li, .reference dd { line-height: 1.6; overflow-wrap: anywhere; }
+.reference dt { font-weight: 700; margin-top: 12px; overflow-wrap: anywhere; }
+.reference dd { margin: 4px 0 12px; }
+.reference code { font-family: "Illinois Mono", monospace; overflow-wrap: anywhere; }
+.reference pre { background: var(--qb-control); border: 1px solid var(--qb-border); border-radius: 8px; padding: 12px; max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.reference pre code { font-size: .85em; }
+.reference .copy-status { font-size: var(--qb-small); }
+.reference-example { min-width: 0; margin: 18px 0; }

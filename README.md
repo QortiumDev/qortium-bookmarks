@@ -4,7 +4,10 @@ Qortium Bookmarks is a first-party QDN app for managing the saved places held
 by Qortium Home. It manages ordinary bookmarks, toolbar links, dashboard pins,
 start pages, and the toolbar visibility setting from one responsive screen.
 
-QDN identity: `qdn://APP/Bookmarks/Bookmarks`
+QDN identity: `qdn://APP/Bookmarks/Bookmarks` (Qortium only).
+
+Saved `qortal://` links remain supported as Home-managed addresses. This app
+has no Qortal app bridge integration or Qortal QDN publication.
 
 ## Requirements
 
@@ -41,10 +44,15 @@ Qortium Home 1.5 or newer.
 - Refresh automatically after Home bookmark changes.
 - Preserve a stale pending edit for explicit review and retry.
 - Follow Home theme, language, accent, text size, and Classic/Modern/Fun UI.
-- Keep route state in fragment history for working Back and Forward controls.
+- Keep collection routes in fragment history for working Back and Forward controls.
+- Developers reference at `?view=developers`, available without manager access.
+  Section links retain the collection fragment and Home query parameters.
 
 See [docs/HOME_BOOKMARKS_BRIDGE.md](docs/HOME_BOOKMARKS_BRIDGE.md) for the
-bridge contract used by the app.
+bridge contract used by the app. The in-app Developers reference is the primary
+developer contract; examples are exported and type-checked against the manager
+types. Unknown `view` values use the collection hash; `developer` and `reference`
+aliases normalize to `developers`.
 
 ## QAVS version
 

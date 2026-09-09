@@ -1,6 +1,12 @@
 # Home bookmarks bridge
 
-Bookmarks depends on these Home 1.5 `qdnRequest` actions:
+The primary developer contract is the in-app Developers workspace at
+`qdn://APP/Bookmarks/Bookmarks?view=developers`, including schema-1 snapshot
+examples, every mutation kind, revision recovery, account opening and privacy.
+It is accessible without granting access to saved places.
+
+Bookmarks depends on these capability-discovered Home `qdnRequest` actions
+(introduced at platform level 1.5):
 
 - `BOOKMARKS_HAS_PERMISSION` checks access without prompting.
 - `BOOKMARKS_GET` asks for access when needed and returns the current snapshot.
@@ -59,3 +65,31 @@ resource's own `favicon.ico`, then the publisher's `THUMBNAIL` avatar
 (`avatar`), then falling back to a name monogram if neither loads.
 Resolutions are cached per resource and loaded lazily as rows scroll into
 view. Non-QDN addresses (`home://...`) keep their generic icon.
+
+## Routing and network scope
+
+The app is Qortium-only. Saving a `qortal://` link still sends that address to
+Home in an ordinary bookmark mutation; Home validates it and chooses the
+network when opening. No Qortal app bridge or Qortal publication is introduced.
+
+`?view=developers` takes precedence over the collection hash. The `developer`
+and `reference` aliases normalize to `developers`. Sections use `?section=...`
+so the selected `#/bookmarks`, `#/toolbar`, `#/pins` or `#/startPages` survives.
+Selecting a collection clears the app-owned view/section keys and sets its
+hash. Repeated unknown and Home query parameters are retained; History restores
+the workspace and reference section. Loaded snapshots remain in memory when
+switching workspaces. A Developers round-trip preserves the search for the same
+collection; choosing another collection clears the filter.
+
+Host limits described in the reference were checked against Home 2.1's
+`electron/bookmark-manager-contract.ts` on 2026-09-09. They belong to Home,
+not to an independent app-side validator; no new address grammar is duplicated
+here. App schema/depth/visibility values and typed examples come from the
+implementation. Update this reference when the host contract changes.
+
+## 1.5.6
+
+Adds the Developers workspace, canonical routes and Home-safe section history,
+copyable typed examples with accessible clipboard feedback, and route/reference
+regression coverage. Existing Home manager authority and saved Qortal addresses
+are preserved.

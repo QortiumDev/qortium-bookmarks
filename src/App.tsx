@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   Bookmark,
+  Code2,
   ExternalLink,
   Folder,
   FolderPlus,
@@ -25,7 +26,8 @@ import {
   openSavedAddress,
   QDN_RESOURCE_URL_ACTION,
 } from './bookmarkApi';
-import { hashForView, viewFromHash, type BookmarkView } from './appRoute';
+import { normalizeWorkspaceUrl, urlForWorkspace, viewFromHash, workspaceFromUrl, type BookmarkWorkspace } from './appRoute';
+import { Reference } from './Reference';
 import {
   buildAccountChoices,
   buildDropMoveMutation,
@@ -77,7 +79,7 @@ import { hasAction, qdnRequest } from './qdnRequest';
 import { bookmarkManagerStateReducer, INITIAL_BOOKMARK_MANAGER_STATE, shouldRefreshForRevision } from './bookmarkState';
 import { BookmarkLoadGuard, runSingleFlight, type SingleFlight } from './bookmarkLoadGuard';
 
-type ViewId = BookmarkView;
+type ViewId = BookmarkWorkspace;
 type Phase = 'booting' | 'permission' | 'ready' | 'unsupported';
 type LinkEditor = {
   kind: 'link';
@@ -118,12 +120,12 @@ const TOUCH_DRAG_MOVE_CANCEL_PX = 12;
 type DropHandler = (payload: BookmarkDragPayload, target: BookmarkDropTarget) => void;
 
 function routeFromLocation(): ViewId {
-  return viewFromHash(window.location.hash);
+  return workspaceFromUrl(window.location.href);
 }
 
 function navigate(view: ViewId) {
-  const nextHash = hashForView(view);
-  if (window.location.hash !== nextHash) window.history.pushState({ view }, '', nextHash);
+  const next = urlForWorkspace(window.location.href, view);
+  if (`${location.pathname}${location.search}${location.hash}` !== next) window.history.pushState(window.history.state, '', next);
 }
 
 function errorMessage(error: unknown) {
@@ -535,7 +537,7 @@ export function App() {
     const onRoute = () => setView(routeFromLocation());
     window.addEventListener('hashchange', onRoute);
     window.addEventListener('popstate', onRoute);
-    if (!window.location.hash) window.history.replaceState({ view: 'bookmarks' }, '', '#/bookmarks');
+    window.history.replaceState(window.history.state, '', normalizeWorkspaceUrl(window.location.href));
     return () => {
       window.removeEventListener('hashchange', onRoute);
       window.removeEventListener('popstate', onRoute);
@@ -721,7 +723,7 @@ export function App() {
       </div>
     ));
 
-  const currentCount = snapshot ? rootCount(snapshot, view === 'pins' ? 'pins' : view) : 0;
+  const currentCount = snapshot && view !== 'developers' ? rootCount(snapshot, view) : 0;
   const currentTree = snapshot && (view === 'bookmarks' || view === 'toolbar') ? snapshot[view] : [];
   const visibleSpecial = snapshot && view === 'pins'
     ? snapshot.dashboardPins.filter((item) => `${specialTitle(item)} ${item.displayUrl}`.toLowerCase().includes(query.toLowerCase()))
@@ -816,31 +818,40 @@ export function App() {
         </div>
       </header>
 
-      {phase === 'booting' ? <section className="gate"><LoaderCircle className="spinner" /><h2>{t('label.loading')}</h2></section> : null}
-      {phase === 'unsupported' ? (
+      <div className="workspace workspace-navigation">
+        <nav className="tabs" aria-label={t('label.bookmarkCollections')}>
+            {([
+              ['bookmarks', t('label.bookmarks'), Bookmark],
+              ['toolbar', t('label.toolbar'), LinkIcon],
+              ['pins', t('label.dashboardPins'), Pin],
+              ['startPages', t('label.startPages'), Home],
+              ['developers', t('label.developers'), Code2],
+            ] as const).map(([id, label, Icon]) => (
+              <button className={`tab${view === id ? ' tab--active' : ''}`} type="button" aria-current={view === id ? 'page' : undefined} key={id} onClick={() => {
+                if (id !== 'developers' && (view !== 'developers' || id !== viewFromHash(window.location.hash))) setQuery('');
+                navigate(id); setView(id);
+              }}>
+                <Icon /><span>{label}</span>{snapshot && id !== 'developers' ? <small>{rootCount(snapshot, id)}</small> : null}
+              </button>
+            ))}
+        </nav>
+      </div>
+      {view === 'developers' ? <Reference /> : null}
+
+      {view !== 'developers' && phase === 'booting' ? <section className="gate"><LoaderCircle className="spinner" /><h2>{t('label.loading')}</h2></section> : null}
+      {view !== 'developers' && phase === 'unsupported' ? (
         <section className="gate"><Home /><h2>{t('label.homeRequired')}</h2><p>{t('error.homeRequired')}</p></section>
       ) : null}
-      {phase === 'permission' ? (
+      {view !== 'developers' && phase === 'permission' ? (
         <section className="gate"><Bookmark /><h2>{t('label.bookmarksAccess')}</h2><p>{t('label.permissionHelp')}</p>
           {error ? <div className="notice notice--error">{error}</div> : null}
           <button className="button button--primary" type="button" disabled={isPermissionPending} onClick={() => void loadSnapshot(true)}>{isPermissionPending ? <LoaderCircle className="spinner" /> : null}{isPermissionPending ? t('label.loading') : t('action.allow')}</button>
         </section>
       ) : null}
 
-      {phase === 'ready' && snapshot ? (
+      {view !== 'developers' && phase === 'ready' && snapshot ? (
         <div className="workspace">
-          <nav className="tabs" aria-label={t('label.bookmarkCollections')}>
-            {([
-              ['bookmarks', t('label.bookmarks'), Bookmark],
-              ['toolbar', t('label.toolbar'), LinkIcon],
-              ['pins', t('label.dashboardPins'), Pin],
-              ['startPages', t('label.startPages'), Home],
-            ] as const).map(([id, label, Icon]) => (
-              <button className={`tab${view === id ? ' tab--active' : ''}`} type="button" key={id} onClick={() => { navigate(id); setView(id); setQuery(''); }}>
-                <Icon /><span>{label}</span><small>{rootCount(snapshot, id === 'pins' ? 'pins' : id)}</small>
-              </button>
-            ))}
-          </nav>
+
 
           <section className="content-panel">
             <div className="content-toolbar">
